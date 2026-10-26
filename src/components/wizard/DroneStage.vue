@@ -11,13 +11,15 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import Model from "../../js/model";
+import MSP from "../../js/msp";
+import MSPCodes from "../../js/msp/MSPCodes";
 import { useSetupData } from "../../composables/setup/useSetupData";
 import { useFlightControllerStore } from "../../stores/fc";
 
 const props = defineProps<{
     mode: "calibrate" | "gyro" | "hidden";
     shifted: boolean;
-    yawOffset: number;
+    gyroOffset: number;
 }>();
 
 const wrapper = ref<HTMLElement | null>(null);
@@ -31,6 +33,7 @@ const DROP_FROM = 70;
 const DROP_MS = 1700;
 
 let model: InstanceType<typeof Model> | null = null;
+let disposed = false;
 let rafId = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let busy = false;
@@ -38,7 +41,7 @@ let busySince = 0;
 let dropStart: number | null = null;
 
 const attitude = { x: 0, y: 0, z: 0 };
-const cur = { x: 0, y: 0, z: 0, yaw: 0 };
+const cur = { x: 0, y: 0, z: 0, offset: 0, rest: REST_Y };
 
 function bounce(input: number): number {
     const n1 = 7.5625;
@@ -97,7 +100,14 @@ function frame(now: number) {
     cur.x += (tx - cur.x) * 0.2;
     cur.z += (tz - cur.z) * 0.2;
     cur.y += angleDiff(ty, cur.y) * 0.2;
-    cur.yaw += (props.yawOffset * RAD - cur.yaw) * 0.1;
+    cur.offset += (props.gyroOffset * RAD - cur.offset) * 0.1;
+    cur.rest += ((live ? 0 : REST_Y) - cur.rest) * 0.08;
+
+    // The offset rotates what the gyro reads: pitch and roll are mixed by the offset angle.
+    const c = Math.cos(cur.offset);
+    const s = Math.sin(cur.offset);
+    const rx = cur.x * c - cur.z * s;
+    const rz = cur.x * s + cur.z * c;
 
     let y = REST_Y;
     let tilt = 0;
@@ -109,16 +119,23 @@ function frame(now: number) {
         y = DROP_FROM + (REST_Y - DROP_FROM) * bounce(t);
         tilt = (1 - t) * 0.35;
     }
-    model.modelWrapper.position.y = y;
-    model.rotateTo(cur.x + tilt, cur.y + cur.yaw, cur.z + tilt * 0.5);
+    model.modelWrapper.position.y = y + (cur.rest - REST_Y);
+    model.rotateTo(rx + tilt, cur.y, rz + tilt * 0.5);
 }
 
 function onResize() {
     model?.resize();
 }
 
-onMounted(() => {
-    if (!wrapper.value || !canvas.value) {
+onMounted(async () => {
+    // The mixer decides which mesh loads; without it the generic labelled cube is used.
+    try {
+        await MSP.promise(MSPCodes.MSP_MIXER_CONFIG, false);
+        await MSP.promise(MSPCodes.MSP_MOTOR_CONFIG, false);
+    } catch (e) {
+        console.warn("DroneStage: could not load mixer config", e);
+    }
+    if (disposed || !wrapper.value || !canvas.value) {
         return;
     }
     model = new Model(wrapper.value, canvas.value);
@@ -128,6 +145,7 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+    disposed = true;
     cancelAnimationFrame(rafId);
     if (pollTimer) {
         clearInterval(pollTimer);

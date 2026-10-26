@@ -37,7 +37,7 @@
                 v-if="connectionStore.connectionValid"
                 :mode="stageMode"
                 :shifted="infoVisible"
-                :yaw-offset="yawOffset"
+                :gyro-offset="gyroOffset"
             />
 
             <div v-if="stepLabel" class="step-label" :class="{ 'step-label--light': isLandingTab }">
@@ -48,33 +48,53 @@
 
             <button type="button" class="theme-toggle" @click="toggleTheme">{{ isDark ? "Light" : "Dark" }}</button>
 
-            <div v-if="isSetupTab" class="rotate-controls">
-                <button type="button" class="rotate-btn" @click="yawOffset += 90">&#8634; 90&deg; left</button>
-                <button type="button" class="rotate-btn" @click="yawOffset -= 90">90&deg; right &#8635;</button>
+            <div
+                v-if="isSetupTab"
+                class="rotate-controls"
+                :class="{ 'rotate-controls--muted': !introDone || introStep === 1, 'rotate-controls--spot': spotlightVisible }"
+            >
+                <button type="button" class="rotate-btn" @click="gyroOffset += 90">&#8634; Rotate 90&deg; left</button>
+                <button type="button" class="rotate-btn" @click="gyroOffset -= 90">Rotate 90&deg; right &#8635;</button>
             </div>
 
             <Transition name="info-fade">
-                <div v-if="infoVisible" class="info-backdrop" @click="infoOpen = false"></div>
+                <div v-if="infoVisible || spotlightVisible" class="info-backdrop"></div>
             </Transition>
+
             <Transition name="info-pop">
                 <aside v-if="infoVisible" class="info-popup">
-                    <button type="button" class="info-popup__close" aria-label="Close" @click="infoOpen = false">
-                        &times;
-                    </button>
-                    <div class="info-popup__eyebrow">Gyro check</div>
-                    <h2>Tilt your drone</h2>
+                    <div class="info-popup__eyebrow">Step 1 &middot; Read first</div>
+                    <h2>How your drone knows which way is up</h2>
                     <p>
-                        Filler text. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Move the drone gently
-                        and watch the model follow every roll, pitch and yaw in real time.
+                        The gyro is a tiny sensor on the flight controller that measures how fast the drone rotates
+                        around its roll, pitch and yaw axes. Together with the accelerometer, which feels gravity, the
+                        flight controller turns those readings into the tilt you see on screen.
                     </p>
                     <p>
-                        Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. If the front of the model
-                        points the wrong way, use the rotate buttons at the top of the screen.
+                        We read it now to confirm the sensor answers correctly and that the board is mounted the way
+                        the firmware expects. If it is turned, a forward tilt shows up as a sideways tilt, and the
+                        drone would fly against its own corrections.
                     </p>
-                    <button type="button" class="info-popup__ok" @click="infoOpen = false">Got it</button>
+                    <p class="info-popup__note">You need to read this before you can continue.</p>
+                    <button type="button" class="info-popup__ok" @click="introStep = 2">Next</button>
                 </aside>
             </Transition>
-            <button v-if="isSetupTab && !infoOpen" type="button" class="info-fab" @click="infoOpen = true">i</button>
+
+            <Transition name="info-pop">
+                <div v-if="spotlightVisible" class="spot-callout">
+                    <div class="spot-callout__arrow"></div>
+                    <h3>Match the model to your drone</h3>
+                    <p>
+                        Tilt your real drone forward. If the model tilts sideways instead, press these buttons until
+                        it tilts forward too. They turn how the gyro reading is mapped on screen, not the model itself.
+                    </p>
+                    <button type="button" class="info-popup__ok" @click="finishIntro">Got it</button>
+                </div>
+            </Transition>
+
+            <button v-if="isSetupTab && introStep === 0 && introDone" type="button" class="info-fab" @click="introStep = 1">
+                i
+            </button>
 
             <div v-if="showWizardBar" class="wizard-bar">
                 <button type="button" class="wizard-btn wizard-btn--ghost" @click="onWizardDisconnect">
@@ -88,7 +108,13 @@
                         :class="{ 'wizard-dot--active': i === wizardIndex, 'wizard-dot--done': i < wizardIndex }"
                     ></span>
                 </div>
-                <button v-if="hasNext" type="button" class="wizard-btn" :disabled="wizardBusy" @click="goNext">
+                <button
+                    v-if="hasNext"
+                    type="button"
+                    class="wizard-btn"
+                    :disabled="wizardBusy || nextBlocked"
+                    @click="goNext"
+                >
                     Next
                 </button>
                 <span v-else class="wizard-spacer"></span>
@@ -337,19 +363,43 @@ const stageMode = computed<"calibrate" | "gyro" | "hidden">(() => {
     }
     return "hidden";
 });
-const yawOffset = ref(0);
+
+// Gyro mapping offset in degrees: rotates what the gyro reads, not the model.
+const gyroOffset = ref(0);
+
+// Gyro screen intro: step 1 popup (mandatory), then a spotlight on the rotate buttons.
+const introStep = ref<0 | 1 | 2>(0);
+const introDone = ref(false);
+const infoVisible = computed(() => isSetupTab.value && introStep.value === 1);
+const spotlightVisible = computed(() => isSetupTab.value && introStep.value === 2);
+const nextBlocked = computed(() => isSetupTab.value && (!introDone.value || introStep.value !== 0));
+
+function finishIntro() {
+    introStep.value = 0;
+    introDone.value = true;
+}
+
+watch(
+    () => connectionStore.connectionValid,
+    (valid) => {
+        if (!valid) {
+            introDone.value = false;
+            introStep.value = 0;
+            gyroOffset.value = 0;
+        }
+    },
+);
 
 function sleep(ms: number) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 async function goNext() {
-    if (wizardBusy.value || !hasNext.value) {
+    if (wizardBusy.value || !hasNext.value || nextBlocked.value) {
         return;
     }
     const next = WIZARD_STEPS[wizardIndex.value + 1];
     wizardBusy.value = true;
-    infoOpen.value = false;
     stageTarget.value = next;
     contentFading.value = true;
     await sleep(550);
@@ -371,20 +421,16 @@ async function onWizardDisconnect() {
     contentFading.value = false;
 }
 
-// Gyro screen: centred popup that moves the 3D model to the right.
-const infoOpen = ref(false);
-const infoVisible = computed(() => isSetupTab.value && infoOpen.value);
-
 watch(
     () => vueTabState.activeTabKey,
     async () => {
-        infoOpen.value = false;
-        if (vueTabState.activeTabName !== "setup") {
+        introStep.value = 0;
+        if (vueTabState.activeTabName !== "setup" || introDone.value) {
             return;
         }
         await sleep(1600);
-        if (vueTabState.activeTabName === "setup") {
-            infoOpen.value = true;
+        if (vueTabState.activeTabName === "setup" && !introDone.value) {
+            introStep.value = 1;
         }
     },
 );
@@ -468,7 +514,17 @@ html.dark:root {
     --wz-muted: #bcd6fb;
 }
 
-/* ---- Test edit v3: layout, texture removal, gradients ---- */
+/* Dark mode: the status bar is dark blue. */
+html.dark .app-status-bar#status-bar {
+    background: linear-gradient(90deg, #031a3d 0%, #06306b 100%) !important;
+    border-top: 1px solid rgba(79, 147, 238, 0.35);
+    color: #ffffff;
+}
+html.dark .app-status-bar#status-bar .text-muted {
+    color: #bcd6fb !important;
+}
+
+/* ---- Test edit v4: layout, texture removal, gradients ---- */
 .app-wrapper .tab_container {
     display: none !important;
 }
@@ -627,6 +683,25 @@ html.dark .app-wrapper #content {
     z-index: 2100;
     display: flex;
     gap: 0.75rem;
+    transition: opacity 0.4s ease;
+}
+.rotate-controls--muted {
+    opacity: 0.25;
+    pointer-events: none;
+}
+.rotate-controls--spot .rotate-btn {
+    animation: rotate-pulse 1.4s ease-in-out infinite;
+    background: #ffffff;
+    box-shadow: 0 0 0 4px rgba(79, 147, 238, 0.55);
+}
+@keyframes rotate-pulse {
+    0%,
+    100% {
+        box-shadow: 0 0 0 3px rgba(79, 147, 238, 0.55);
+    }
+    50% {
+        box-shadow: 0 0 0 11px rgba(79, 147, 238, 0);
+    }
 }
 .rotate-btn {
     padding: 0.45rem 1.1rem;
@@ -634,24 +709,18 @@ html.dark .app-wrapper #content {
     font-size: 0.85rem;
 }
 
-/* Centred gyro popup. */
+/* Centred mandatory popup, and the spotlight callout under the rotate buttons. */
 .info-backdrop {
     position: fixed;
     inset: 0;
     z-index: 1400;
-    background: rgba(0, 8, 24, 0.45);
+    background: rgba(0, 8, 24, 0.55);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
 }
-.info-popup {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+.info-popup,
+.spot-callout {
     z-index: 1500;
-    width: min(34rem, 86vw);
-    padding: 2.25rem;
-    border-radius: 1.5rem;
     border: 1px solid rgba(14, 95, 201, 0.35);
     background:
         radial-gradient(22rem 16rem at 100% 0%, rgba(14, 95, 201, 0.18), transparent 70%),
@@ -659,12 +728,22 @@ html.dark .app-wrapper #content {
     box-shadow: 0 30px 80px rgba(0, 8, 24, 0.5);
     color: #0b3366;
 }
-html.dark .info-popup {
+html.dark .info-popup,
+html.dark .spot-callout {
     background:
         radial-gradient(22rem 16rem at 100% 0%, rgba(79, 147, 238, 0.35), transparent 70%),
         linear-gradient(160deg, #0e5fc9 0%, #04204a 60%, #000000 130%);
     border-color: rgba(255, 255, 255, 0.25);
     color: #ffffff;
+}
+.info-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(34rem, 86vw);
+    padding: 2.25rem;
+    border-radius: 1.5rem;
 }
 .info-popup__eyebrow {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -679,26 +758,22 @@ html.dark .info-popup__eyebrow {
 }
 .info-popup h2 {
     margin: 0 0 1rem;
-    font-size: 2rem;
+    font-size: 1.8rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     line-height: 1.15;
 }
 .info-popup p {
     margin: 0 0 0.9rem;
-    font-size: 1rem;
+    font-size: 0.98rem;
     line-height: 1.6;
 }
-.info-popup__close {
-    position: absolute;
-    top: 0.8rem;
-    inset-inline-end: 1rem;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font-size: 1.7rem;
-    line-height: 1;
-    cursor: pointer;
+.info-popup__note {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.8;
 }
 .info-popup__ok {
     margin-top: 0.5rem;
@@ -709,6 +784,36 @@ html.dark .info-popup__eyebrow {
     color: #ffffff;
     font-weight: 600;
     cursor: pointer;
+}
+.spot-callout {
+    position: fixed;
+    top: 4.6rem;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(26rem, 86vw);
+    padding: 1.4rem 1.6rem;
+    border-radius: 1.2rem;
+}
+.spot-callout__arrow {
+    position: absolute;
+    top: -0.55rem;
+    left: 50%;
+    width: 1.1rem;
+    height: 1.1rem;
+    transform: translateX(-50%) rotate(45deg);
+    background: inherit;
+    border-left: 1px solid rgba(255, 255, 255, 0.25);
+    border-top: 1px solid rgba(255, 255, 255, 0.25);
+}
+.spot-callout h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1.15rem;
+    font-weight: 700;
+}
+.spot-callout p {
+    margin: 0 0 0.8rem;
+    font-size: 0.92rem;
+    line-height: 1.55;
 }
 .info-fade-enter-active,
 .info-fade-leave-active {
@@ -724,10 +829,15 @@ html.dark .info-popup__eyebrow {
         opacity 0.6s ease,
         transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.info-pop-enter-from,
-.info-pop-leave-to {
+.info-popup.info-pop-enter-from,
+.info-popup.info-pop-leave-to {
     opacity: 0;
     transform: translate(-50%, -46%) scale(0.95);
+}
+.spot-callout.info-pop-enter-from,
+.spot-callout.info-pop-leave-to {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-0.8rem);
 }
 
 /* Floating Next / Disconnect pills above the status bar. */
@@ -792,7 +902,7 @@ html.dark .info-popup__eyebrow {
     transform: translateY(-1px);
 }
 .wizard-btn:disabled {
-    opacity: 0.6;
+    opacity: 0.45;
     cursor: default;
 }
 .wizard-btn--ghost {
