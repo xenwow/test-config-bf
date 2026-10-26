@@ -42,9 +42,12 @@ function onDisconnect() {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #ffffff;
     color: #0b3366;
     padding: 2rem;
+    background:
+        radial-gradient(50rem 32rem at 50% 30%, rgba(14, 95, 201, 0.16), transparent 65%),
+        radial-gradient(40rem 30rem at 100% 100%, rgba(79, 147, 238, 0.22), transparent 60%),
+        linear-gradient(180deg, #ffffff 0%, #eaf2fe 100%);
 }
 .tab-complete .complete-card {
     display: flex;
@@ -57,20 +60,24 @@ function onDisconnect() {
     width: 7rem;
     height: 7rem;
     border-radius: 9999px;
-    background: #0e5fc9;
+    background: linear-gradient(145deg, #4f93ee 0%, #0e5fc9 55%, #0a3f8a 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 10px 30px rgba(14, 95, 201, 0.35);
+    box-shadow: 0 14px 40px rgba(14, 95, 201, 0.4);
 }
 .tab-complete .complete-check svg {
     width: 4.5rem;
     height: 4.5rem;
 }
 .tab-complete h1 {
-    font-size: 2.5rem;
+    font-size: 3rem;
     font-weight: 700;
-    color: #0e5fc9;
+    letter-spacing: -0.02em;
+    background: linear-gradient(90deg, #0e5fc9, #0a3f8a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
     margin: 0;
 }
 .tab-complete p {
@@ -88,10 +95,10 @@ function onDisconnect() {
     font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background 0.25s ease, color 0.25s ease;
 }
 .tab-complete .complete-btn:hover {
-    background: #0e5fc9;
+    background: linear-gradient(135deg, #1478f0, #0e5fc9 55%, #0a3f8a);
     color: #ffffff;
 }
 </style>
