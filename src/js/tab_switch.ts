@@ -21,7 +21,7 @@
 
 import { i18n } from "./localization";
 import { gui_log } from "./gui_log";
-import { get as getConfig, set as setConfig } from "./ConfigStorage";
+import { set as setConfig } from "./ConfigStorage";
 import { checkSetupAnalytics } from "./Analytics";
 import { tabSwitchCleanup } from "./tab_adapters";
 import { mountVueTab, vueTabState } from "./vue_tab_mounter";
@@ -158,14 +158,9 @@ export function switchTab(tabKey: string, options: SwitchTabOptions = {}): boole
     return true;
 }
 
-/** Opens the remembered last tab after connecting, when that option is on and the tab is allowed, else Setup. */
+/** Test edit: after connecting, the guided flow always starts at the accelerometer calibration step. */
 export function selectDefaultTabWhenConnected(): void {
-    const result = getConfig(["rememberLastTab", "lastTab"]);
-    const lastTab = typeof result.lastTab === "string" ? result.lastTab.substring(4) : "";
-    const tabKey =
-        result.rememberLastTab && lastTab && useNavigationStore().allowedTabs.includes(lastTab) ? lastTab : "setup";
-
-    if (!switchTab(tabKey, { mode: "connected" })) {
+    if (!switchTab("calibrate", { mode: "loggedin" })) {
         switchTab("setup", { mode: "connected" });
     }
 }

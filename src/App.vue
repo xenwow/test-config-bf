@@ -33,13 +33,30 @@
                 </div>
             </div>
 
+            <DroneStage
+                v-if="connectionStore.connectionValid"
+                :mode="stageMode"
+                :shifted="infoVisible"
+                :yaw-offset="yawOffset"
+            />
+
             <div v-if="stepLabel" class="step-label" :class="{ 'step-label--light': isLandingTab }">
                 <span class="step-label__num">{{ stepLabel.num }}</span>
                 <span class="step-label__rule"></span>
                 <span class="step-label__text">{{ stepLabel.text }}</span>
             </div>
 
-            <Transition name="info-slide">
+            <button type="button" class="theme-toggle" @click="toggleTheme">{{ isDark ? "Light" : "Dark" }}</button>
+
+            <div v-if="isSetupTab" class="rotate-controls">
+                <button type="button" class="rotate-btn" @click="yawOffset += 90">&#8634; 90&deg; left</button>
+                <button type="button" class="rotate-btn" @click="yawOffset -= 90">90&deg; right &#8635;</button>
+            </div>
+
+            <Transition name="info-fade">
+                <div v-if="infoVisible" class="info-backdrop" @click="infoOpen = false"></div>
+            </Transition>
+            <Transition name="info-pop">
                 <aside v-if="infoVisible" class="info-popup">
                     <button type="button" class="info-popup__close" aria-label="Close" @click="infoOpen = false">
                         &times;
@@ -51,16 +68,13 @@
                         and watch the model follow every roll, pitch and yaw in real time.
                     </p>
                     <p>
-                        Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. When the model matches the
-                        real aircraft, continue to the motor test.
+                        Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. If the front of the model
+                        points the wrong way, use the rotate buttons at the top of the screen.
                     </p>
+                    <button type="button" class="info-popup__ok" @click="infoOpen = false">Got it</button>
                 </aside>
             </Transition>
             <button v-if="isSetupTab && !infoOpen" type="button" class="info-fab" @click="infoOpen = true">i</button>
-
-            <Teleport v-if="motorStageHost" :to="motorStageHost">
-                <ModelStage />
-            </Teleport>
 
             <div v-if="showWizardBar" class="wizard-bar">
                 <button type="button" class="wizard-btn wizard-btn--ghost" @click="onWizardDisconnect">
@@ -79,6 +93,18 @@
                 </button>
                 <span v-else class="wizard-spacer"></span>
             </div>
+            <status-bar
+                :port-usage-down="PortUsage.port_usage_down"
+                :port-usage-up="PortUsage.port_usage_up"
+                :connection-timestamp="CONNECTION.timestamp"
+                :packet-error="connectionStore.packetErrors"
+                :cycle-time="fcStore.config.cycleTime"
+                :cpu-load="fcStore.config.cpuload"
+                :cpu-temperature="fcStore.config.cpuTemp"
+                :configurator-version="appInfo.displayVersion"
+                :firmware-version="fcStore.config.flightControllerVersion"
+                :firmware-target="fcStore.config.hardwareName"
+            ></status-bar>
             <div id="cache">
                 <div class="data-loading">
                     <p i18n="dataWaitingForData">Waiting for data ...</p>
@@ -91,13 +117,15 @@
 
 <script setup lang="ts">
 import { isAndroid } from "@/js/utils/checkCompatibility";
-import { computed, nextTick, provide, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onMounted, provide, reactive, ref, shallowRef, watch } from "vue";
 import { onKeyStroke, useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";
 import GlobalDialogs from "./components/dialogs/GlobalDialogs.vue";
 import Sidebar from "./components/sidebar/Sidebar.vue";
-import ModelStage from "./components/wizard/ModelStage.vue";
+import DroneStage from "./components/wizard/DroneStage.vue";
+import PortUsageModule from "./js/port_usage";
 import { i18n } from "./js/localization";
+import { setDarkTheme } from "./js/DarkTheme";
 import { useUiLocale } from "./composables/useUiLocale";
 import { useFlightControllerStore } from "./stores/fc";
 import { useConnectionStore } from "./stores/connection";
@@ -116,6 +144,9 @@ import { disconnect } from "./js/serial_backend";
 if (!window.vm) {
     window.vm = reactive({ expertMode: false });
 }
+
+// Stable fallback so computed() does not allocate a new reactive per evaluation when window.vm.CONNECTION is missing.
+const connectionFallback = reactive({ timestamp: null });
 
 // Track latest window.vm so computeds re-run when it is reassigned (import order vs. init.js).
 const syncedVm = shallowRef(window.vm);
@@ -140,6 +171,8 @@ function currentVm() {
 const fcStore = useFlightControllerStore();
 const connectionStore = useConnectionStore();
 const appInfo = useAppInfoStore();
+const PortUsage = computed(() => currentVm()?.PortUsage ?? PortUsageModule);
+const CONNECTION = computed(() => currentVm()?.CONNECTION ?? connectionFallback);
 
 // Nuxt UI needs its own locale to pick up the text direction and translate its built-in
 // strings; without it every element renders LTR and in English (see issue #5482).
@@ -255,13 +288,35 @@ const activeTabKey = computed(() =>
     vueTabState.activeTabName === "blackbox_viewer" ? "blackbox_viewer" : vueTabState.activeTabKey,
 );
 
-// Guided flow: connect -> gyro (setup) -> motors -> complete.
-const WIZARD_STEPS = ["setup", "motors", "complete"];
+// Theme: dark (blue to black gradient) by default, with a light alternative.
+const THEME_KEY = "bfTestEditTheme";
+const isDark = ref(true);
+
+function applyTheme() {
+    setDarkTheme(isDark.value ? 0 : 1);
+    document.documentElement.classList.toggle("dark", isDark.value);
+}
+
+function toggleTheme() {
+    isDark.value = !isDark.value;
+    localStorage.setItem(THEME_KEY, isDark.value ? "dark" : "light");
+    applyTheme();
+}
+
+onMounted(() => {
+    isDark.value = localStorage.getItem(THEME_KEY) !== "light";
+    applyTheme();
+    setTimeout(applyTheme, 800);
+});
+
+// Guided flow: connect -> calibrate -> gyro (setup) -> motors -> complete.
+const WIZARD_STEPS = ["calibrate", "setup", "motors", "complete"];
 const STEP_LABELS: Record<string, { num: string; text: string }> = {
     landing: { num: "01", text: "Connect" },
-    setup: { num: "02", text: "Gyro" },
-    motors: { num: "03", text: "Motors" },
-    complete: { num: "04", text: "Complete" },
+    calibrate: { num: "02", text: "Calibrate" },
+    setup: { num: "03", text: "Gyro" },
+    motors: { num: "04", text: "Motors" },
+    complete: { num: "05", text: "Complete" },
 };
 const stepLabel = computed(() => STEP_LABELS[vueTabState.activeTabName ?? ""] ?? null);
 const wizardIndex = computed(() => WIZARD_STEPS.indexOf(vueTabState.activeTabName ?? ""));
@@ -269,6 +324,20 @@ const showWizardBar = computed(() => connectionStore.connectionValid && wizardIn
 const hasNext = computed(() => wizardIndex.value >= 0 && wizardIndex.value < WIZARD_STEPS.length - 1);
 const contentFading = ref(false);
 const wizardBusy = ref(false);
+
+// The shared 3D drone starts moving to the next scene's position while the content fades out.
+const stageTarget = ref<string | null>(null);
+const stageMode = computed<"calibrate" | "gyro" | "hidden">(() => {
+    const tab = stageTarget.value ?? vueTabState.activeTabName;
+    if (tab === "calibrate") {
+        return "calibrate";
+    }
+    if (tab === "setup") {
+        return "gyro";
+    }
+    return "hidden";
+});
+const yawOffset = ref(0);
 
 function sleep(ms: number) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -280,14 +349,17 @@ async function goNext() {
     }
     const next = WIZARD_STEPS[wizardIndex.value + 1];
     wizardBusy.value = true;
+    infoOpen.value = false;
+    stageTarget.value = next;
     contentFading.value = true;
-    await sleep(450);
+    await sleep(550);
     const started = switchTab(next, { mode: next === "complete" ? "loggedin" : "connected" });
     if (started) {
         for (let i = 0; i < 60 && vueTabState.activeTabName !== next; i++) {
             await sleep(50);
         }
     }
+    stageTarget.value = null;
     contentFading.value = false;
     wizardBusy.value = false;
 }
@@ -299,7 +371,7 @@ async function onWizardDisconnect() {
     contentFading.value = false;
 }
 
-// Gyro screen: filler popup that slides in and pushes the 3D model to the left.
+// Gyro screen: centred popup that moves the 3D model to the right.
 const infoOpen = ref(false);
 const infoVisible = computed(() => isSetupTab.value && infoOpen.value);
 
@@ -310,52 +382,9 @@ watch(
         if (vueTabState.activeTabName !== "setup") {
             return;
         }
-        await sleep(1100);
+        await sleep(1600);
         if (vueTabState.activeTabName === "setup") {
             infoOpen.value = true;
-        }
-    },
-);
-
-// The model canvas only resizes on window resize, so pump resize events while the layout animates.
-watch(infoVisible, () => {
-    const start = performance.now();
-    const tick = () => {
-        window.dispatchEvent(new Event("resize"));
-        if (performance.now() - start < 800) {
-            requestAnimationFrame(tick);
-        }
-    };
-    requestAnimationFrame(tick);
-});
-
-// Motors screen: swap the flat mixer SVG for the same 3D model the gyro screen uses.
-const motorStageHost = shallowRef<HTMLElement | null>(null);
-
-watch(
-    () => vueTabState.activeTabKey,
-    async () => {
-        if (motorStageHost.value) {
-            motorStageHost.value.remove();
-            motorStageHost.value = null;
-        }
-        if (vueTabState.activeTabName !== "motors") {
-            return;
-        }
-        for (let i = 0; i < 40; i++) {
-            await sleep(100);
-            if (vueTabState.activeTabName !== "motors") {
-                return;
-            }
-            const svgBox = document.querySelector<HTMLElement>(".tab-motors .p-2\\.5.justify-center");
-            if (svgBox?.parentElement) {
-                const host = document.createElement("div");
-                host.className = "motor-stage-host";
-                svgBox.parentElement.insertBefore(host, svgBox);
-                svgBox.style.display = "none";
-                motorStageHost.value = host;
-                return;
-            }
         }
     },
 );
@@ -389,7 +418,7 @@ watch(
 </style>
 
 <style>
-/* ---- Test edit: #0e5fc9 + white palette (overrides theme.css tokens) ---- */
+/* ---- Test edit: #0e5fc9 palette (overrides theme.css tokens) ---- */
 html:root,
 html.dark:root {
     --color-primary-50: #eef5fe;
@@ -429,7 +458,17 @@ html.dark:root {
     --ui-text-inverted: #ffffff;
 }
 
-/* ---- Test edit v2: layout, texture removal, gradients ---- */
+/* Foreground colours for the guided-flow screens, per theme. */
+html:root {
+    --wz-fg: #0b3366;
+    --wz-muted: #3d5f8f;
+}
+html.dark:root {
+    --wz-fg: #ffffff;
+    --wz-muted: #bcd6fb;
+}
+
+/* ---- Test edit v3: layout, texture removal, gradients ---- */
 .app-wrapper .tab_container {
     display: none !important;
 }
@@ -455,21 +494,26 @@ body,
     background-image: none !important;
 }
 
+/* Light: white to blue. Dark: blue to black. */
 .app-wrapper #content {
     margin-inline-start: 0 !important;
     inset-inline-start: 0 !important;
     width: 100% !important;
     background:
-        radial-gradient(60rem 34rem at 88% -8%, rgba(14, 95, 201, 0.2), transparent 62%),
-        radial-gradient(50rem 30rem at -8% 108%, rgba(79, 147, 238, 0.2), transparent 62%),
-        linear-gradient(180deg, #f8fbff 0%, #e8f1fd 100%) !important;
+        radial-gradient(60rem 34rem at 88% -8%, rgba(14, 95, 201, 0.25), transparent 62%),
+        linear-gradient(180deg, #ffffff 0%, #dbe9fd 55%, #8dbaf7 100%) !important;
     transition:
-        opacity 0.45s ease,
-        transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
-        filter 0.45s ease;
+        opacity 0.5s ease,
+        transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+        filter 0.5s ease;
+}
+html.dark .app-wrapper #content {
+    background:
+        radial-gradient(70rem 40rem at 85% -10%, rgba(14, 95, 201, 0.7), transparent 60%),
+        linear-gradient(180deg, #0e5fc9 0%, #073a7e 30%, #020b1c 70%, #000000 100%) !important;
 }
 .app-wrapper.wizard-bar-visible #content {
-    padding-bottom: 6rem;
+    padding-bottom: 7rem;
 }
 #content.wizard-fading {
     opacity: 0;
@@ -489,10 +533,9 @@ body,
     }
 }
 #content > * {
-    animation: wizard-fade-in 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: wizard-fade-in 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Space for the step label; the original tab titles and wiki buttons are replaced by it. */
 .app-wrapper #content .content_wrapper {
     padding-top: 4rem;
 }
@@ -500,18 +543,15 @@ body,
     display: none;
 }
 
-/* Gyro screen: drop the detailed data panels, let the model breathe. */
+/* Gyro screen: the shared floating drone replaces the boxed canvas; data panels are hidden. */
+.tab-setup #interactive_block {
+    visibility: hidden;
+}
 .tab-setup .setup-info-grid {
     display: none !important;
 }
-.tab-setup .setup-top {
-    transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.app-wrapper.info-open .tab-setup .setup-top {
-    width: calc(100% - 26rem);
-}
 
-/* Step label: numbered section marker, spec-sheet style. */
+/* Step label. */
 .step-label {
     position: fixed;
     top: 1.25rem;
@@ -524,12 +564,12 @@ body,
     font-size: 0.8rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #0b3366;
+    color: var(--wz-fg);
     pointer-events: none;
 }
 .step-label__num {
     font-weight: 700;
-    color: #0e5fc9;
+    color: #4f93ee;
 }
 .step-label__rule {
     width: 3rem;
@@ -542,23 +582,89 @@ body,
     color: #ffffff;
 }
 
-/* Gyro info popup. */
+/* Theme toggle and gyro controls. */
+.theme-toggle,
+.rotate-btn,
+.info-fab {
+    border: 2px solid #0e5fc9;
+    background: rgba(255, 255, 255, 0.92);
+    color: #0e5fc9;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+        background 0.25s ease,
+        color 0.25s ease;
+}
+.theme-toggle:hover,
+.rotate-btn:hover,
+.info-fab:hover {
+    background: #0e5fc9;
+    color: #ffffff;
+}
+.theme-toggle {
+    position: fixed;
+    top: 1.1rem;
+    inset-inline-end: 1.5rem;
+    z-index: 2100;
+    padding: 0.4rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+}
+.info-fab {
+    position: fixed;
+    top: 1.1rem;
+    inset-inline-end: 6.2rem;
+    z-index: 2100;
+    width: 2.2rem;
+    height: 2.2rem;
+    border-radius: 9999px;
+}
+.rotate-controls {
+    position: fixed;
+    top: 1.1rem;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 2100;
+    display: flex;
+    gap: 0.75rem;
+}
+.rotate-btn {
+    padding: 0.45rem 1.1rem;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+}
+
+/* Centred gyro popup. */
+.info-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1400;
+    background: rgba(0, 8, 24, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
 .info-popup {
     position: fixed;
-    top: 4.5rem;
-    bottom: 6rem;
-    inset-inline-end: 1.25rem;
-    width: 24rem;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     z-index: 1500;
-    padding: 1.75rem;
-    overflow-y: auto;
-    border-radius: 1.25rem;
-    border: 1px solid rgba(14, 95, 201, 0.25);
+    width: min(34rem, 86vw);
+    padding: 2.25rem;
+    border-radius: 1.5rem;
+    border: 1px solid rgba(14, 95, 201, 0.35);
     background:
-        radial-gradient(18rem 14rem at 100% 0%, rgba(14, 95, 201, 0.16), transparent 70%),
-        linear-gradient(160deg, rgba(255, 255, 255, 0.97), rgba(226, 238, 253, 0.95));
-    box-shadow: 0 24px 60px rgba(7, 31, 64, 0.28);
+        radial-gradient(22rem 16rem at 100% 0%, rgba(14, 95, 201, 0.18), transparent 70%),
+        linear-gradient(160deg, #ffffff, #e2eefd);
+    box-shadow: 0 30px 80px rgba(0, 8, 24, 0.5);
     color: #0b3366;
+}
+html.dark .info-popup {
+    background:
+        radial-gradient(22rem 16rem at 100% 0%, rgba(79, 147, 238, 0.35), transparent 70%),
+        linear-gradient(160deg, #0e5fc9 0%, #04204a 60%, #000000 130%);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: #ffffff;
 }
 .info-popup__eyebrow {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -568,60 +674,67 @@ body,
     color: #0e5fc9;
     margin-bottom: 0.5rem;
 }
+html.dark .info-popup__eyebrow {
+    color: #bcd6fb;
+}
 .info-popup h2 {
     margin: 0 0 1rem;
-    font-size: 1.8rem;
+    font-size: 2rem;
     font-weight: 700;
     letter-spacing: -0.02em;
     line-height: 1.15;
 }
 .info-popup p {
     margin: 0 0 0.9rem;
-    font-size: 0.95rem;
-    line-height: 1.55;
+    font-size: 1rem;
+    line-height: 1.6;
 }
 .info-popup__close {
     position: absolute;
-    top: 0.75rem;
-    inset-inline-end: 0.9rem;
+    top: 0.8rem;
+    inset-inline-end: 1rem;
     border: 0;
     background: transparent;
-    color: #0e5fc9;
-    font-size: 1.6rem;
+    color: inherit;
+    font-size: 1.7rem;
     line-height: 1;
     cursor: pointer;
 }
-.info-fab {
-    position: fixed;
-    inset-inline-end: 1.5rem;
-    top: 1.1rem;
-    z-index: 1500;
-    width: 2.4rem;
-    height: 2.4rem;
+.info-popup__ok {
+    margin-top: 0.5rem;
+    padding: 0.65rem 1.8rem;
     border-radius: 9999px;
-    border: 2px solid #0e5fc9;
-    background: #ffffff;
-    color: #0e5fc9;
-    font-weight: 700;
+    border: 2px solid #ffffff;
+    background: linear-gradient(135deg, #1478f0 0%, #0e5fc9 55%, #0a3f8a 100%);
+    color: #ffffff;
+    font-weight: 600;
     cursor: pointer;
 }
-.info-slide-enter-active,
-.info-slide-leave-active {
-    transition:
-        opacity 0.5s ease,
-        transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+.info-fade-enter-active,
+.info-fade-leave-active {
+    transition: opacity 0.6s ease;
 }
-.info-slide-enter-from,
-.info-slide-leave-to {
+.info-fade-enter-from,
+.info-fade-leave-to {
     opacity: 0;
-    transform: translateX(3rem);
+}
+.info-pop-enter-active,
+.info-pop-leave-active {
+    transition:
+        opacity 0.6s ease,
+        transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.info-pop-enter-from,
+.info-pop-leave-to {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.95);
 }
 
-/* Floating Next / Disconnect pills (no bar). */
+/* Floating Next / Disconnect pills above the status bar. */
 .wizard-bar {
     position: fixed;
     inset-inline: 0;
-    bottom: 1.5rem;
+    bottom: 3.75rem;
     z-index: 2000;
     display: flex;
     align-items: center;
@@ -692,7 +805,7 @@ body,
     color: #ffffff;
 }
 
-/* Main app content wrapper - flex column */
+/* Main app content wrapper - flex column to push status bar to bottom */
 .app-wrapper {
     display: flex;
     flex-direction: column;

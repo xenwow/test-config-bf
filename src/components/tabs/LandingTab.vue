@@ -18,9 +18,9 @@ import ConnectButton from "../device-picker/ConnectButton.vue";
     display: flex;
     min-height: 100%;
     background:
-        radial-gradient(60rem 40rem at 18% 8%, rgba(14, 95, 201, 0.55), transparent 60%),
-        radial-gradient(50rem 40rem at 92% 92%, rgba(79, 147, 238, 0.35), transparent 60%),
-        linear-gradient(160deg, #01060f 0%, #04204a 45%, #0a3f86 100%) !important;
+        radial-gradient(60rem 40rem at 18% 8%, rgba(14, 95, 201, 0.7), transparent 60%),
+        radial-gradient(50rem 40rem at 92% 92%, rgba(79, 147, 238, 0.25), transparent 60%),
+        linear-gradient(160deg, #0e5fc9 0%, #073a7e 35%, #020b1c 70%, #000000 100%) !important;
     background-size: 140% 140%, 140% 140%, 100% 100%;
     animation: landing-drift 16s ease-in-out infinite alternate;
 }

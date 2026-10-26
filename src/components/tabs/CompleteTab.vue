@@ -42,12 +42,8 @@ function onDisconnect() {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #0b3366;
+    color: var(--wz-fg);
     padding: 2rem;
-    background:
-        radial-gradient(50rem 32rem at 50% 30%, rgba(14, 95, 201, 0.16), transparent 65%),
-        radial-gradient(40rem 30rem at 100% 100%, rgba(79, 147, 238, 0.22), transparent 60%),
-        linear-gradient(180deg, #ffffff 0%, #eaf2fe 100%);
 }
 .tab-complete .complete-card {
     display: flex;
@@ -64,7 +60,7 @@ function onDisconnect() {
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 14px 40px rgba(14, 95, 201, 0.4);
+    box-shadow: 0 14px 40px rgba(14, 95, 201, 0.5);
 }
 .tab-complete .complete-check svg {
     width: 4.5rem;
@@ -74,15 +70,11 @@ function onDisconnect() {
     font-size: 3rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    background: linear-gradient(90deg, #0e5fc9, #0a3f8a);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
     margin: 0;
 }
 .tab-complete p {
     font-size: 1rem;
-    color: #0b3366;
+    color: var(--wz-muted);
     margin: 0;
 }
 .tab-complete .complete-btn {
