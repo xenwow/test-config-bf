@@ -1,6 +1,6 @@
 <template>
     <UApp :locale="uiLocale" :tooltip="{ delayDuration: 100 }" portal="#main-wrapper">
-        <div class="app-wrapper">
+        <div class="app-wrapper" :class="{ 'wizard-bar-visible': showWizardBar }">
             <div id="background" v-if="isMobileSidebarOpen" aria-hidden="true" @click="isRevealed = false"></div>
             <div id="side_menu_swipe"></div>
             <div v-if="isLandingTab" class="mobile-topbar" :class="{ 'mobile-topbar--hidden': topbarHidden }">
@@ -21,7 +21,7 @@
                     <Sidebar />
                     <div class="clear-both"></div>
                 </div>
-                <div id="content" @scroll.passive="onContentScroll">
+                <div id="content" :class="{ 'wizard-fading': contentFading }" @scroll.passive="onContentScroll">
                     <keep-alive :include="keptAliveTabs">
                         <component
                             :is="activeTabComponent"
@@ -31,6 +31,23 @@
                         />
                     </keep-alive>
                 </div>
+            </div>
+            <div v-if="showWizardBar" class="wizard-bar">
+                <button type="button" class="wizard-btn wizard-btn--ghost" @click="onWizardDisconnect">
+                    Disconnect
+                </button>
+                <div class="wizard-steps" aria-hidden="true">
+                    <span
+                        v-for="(step, i) in WIZARD_STEPS"
+                        :key="step"
+                        class="wizard-dot"
+                        :class="{ 'wizard-dot--active': i === wizardIndex, 'wizard-dot--done': i < wizardIndex }"
+                    ></span>
+                </div>
+                <button v-if="hasNext" type="button" class="wizard-btn" :disabled="wizardBusy" @click="goNext">
+                    Next
+                </button>
+                <span v-else class="wizard-spacer"></span>
             </div>
             <status-bar
                 :port-usage-down="PortUsage.port_usage_down"
@@ -74,6 +91,8 @@ import {
     vueTabState,
 } from "./js/vue_tab_mounter.js";
 import { VueTabComponents } from "./js/vue_tab_registry";
+import { switchTab } from "./js/tab_switch";
+import { disconnect } from "./js/serial_backend";
 
 // Tests or unusual entry points may run without init.js; init.js overwrites this synchronously after its model exists.
 if (!window.vm) {
@@ -223,6 +242,43 @@ const activeTabKey = computed(() =>
     vueTabState.activeTabName === "blackbox_viewer" ? "blackbox_viewer" : vueTabState.activeTabKey,
 );
 
+// Guided flow: connect -> gyro (setup) -> motors -> complete.
+const WIZARD_STEPS = ["setup", "motors", "complete"];
+const wizardIndex = computed(() => WIZARD_STEPS.indexOf(vueTabState.activeTabName ?? ""));
+const showWizardBar = computed(() => connectionStore.connectionValid && wizardIndex.value >= 0);
+const hasNext = computed(() => wizardIndex.value >= 0 && wizardIndex.value < WIZARD_STEPS.length - 1);
+const contentFading = ref(false);
+const wizardBusy = ref(false);
+
+function sleep(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function goNext() {
+    if (wizardBusy.value || !hasNext.value) {
+        return;
+    }
+    const next = WIZARD_STEPS[wizardIndex.value + 1];
+    wizardBusy.value = true;
+    contentFading.value = true;
+    await sleep(350);
+    const started = switchTab(next, { mode: next === "complete" ? "loggedin" : "connected" });
+    if (started) {
+        for (let i = 0; i < 60 && vueTabState.activeTabName !== next; i++) {
+            await sleep(50);
+        }
+    }
+    contentFading.value = false;
+    wizardBusy.value = false;
+}
+
+async function onWizardDisconnect() {
+    contentFading.value = true;
+    await sleep(250);
+    await disconnect();
+    contentFading.value = false;
+}
+
 provide("betaflightModel", currentVm());
 provide(TAB_ADAPTER_REGISTRATION_KEY, tabAdapterRegistration);
 
@@ -252,6 +308,145 @@ watch(
 </style>
 
 <style>
+/* ---- Test edit: #0e5fc9 + white palette (overrides theme.css tokens) ---- */
+html:root,
+html.dark:root {
+    --color-primary-50: #eef5fe;
+    --color-primary-100: #dbe9fd;
+    --color-primary-200: #bcd6fb;
+    --color-primary-300: #8dbaf7;
+    --color-primary-400: #4f93ee;
+    --color-primary-500: #0e5fc9;
+    --color-primary-600: #0e5fc9;
+    --color-primary-700: #0b4ba0;
+    --color-primary-800: #0a3c80;
+    --color-primary-900: #0b3366;
+    --color-primary-950: #071f40;
+
+    --primary-50: #eef5fe;
+    --primary-100: #dbe9fd;
+    --primary-200: #bcd6fb;
+    --primary-300: #8dbaf7;
+    --primary-400: #4f93ee;
+    --primary-500: #0e5fc9;
+    --primary-600: #0e5fc9;
+    --primary-700: #0b4ba0;
+    --primary-800: #0a3c80;
+    --primary-900: #0b3366;
+    --primary-950: #071f40;
+
+    --primary-transparent-1: rgba(14, 95, 201, 0.1);
+    --primary-transparent-2: rgba(14, 95, 201, 0.2);
+    --primary-transparent-3: rgba(14, 95, 201, 0.3);
+    --primary-transparent-4: rgba(14, 95, 201, 0.4);
+
+    --primary-action: #0e5fc9;
+    --primary-action-border: #0b4ba0;
+    --primary-action-hover: #4f93ee;
+
+    --ui-primary: #0e5fc9;
+    --ui-text-inverted: #ffffff;
+}
+
+/* ---- Test edit: guided flow chrome ---- */
+/* The sidebar is replaced by the Next / Disconnect bar. */
+.app-wrapper .tab_container {
+    display: none !important;
+}
+.app-wrapper #tab-content-container {
+    padding-inline-start: 0 !important;
+}
+.app-wrapper #content {
+    margin-inline-start: 0 !important;
+    inset-inline-start: 0 !important;
+    width: 100% !important;
+    transition: opacity 0.35s ease;
+}
+.app-wrapper.wizard-bar-visible #content {
+    padding-bottom: 5rem;
+}
+#content.wizard-fading {
+    opacity: 0;
+}
+@keyframes wizard-fade-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+#content > * {
+    animation: wizard-fade-in 0.45s ease both;
+}
+
+.wizard-bar {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 3.75rem;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.5rem;
+    pointer-events: none;
+}
+.wizard-bar > * {
+    pointer-events: auto;
+}
+.wizard-spacer {
+    min-width: 7rem;
+}
+.wizard-steps {
+    display: flex;
+    gap: 0.6rem;
+}
+.wizard-dot {
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 9999px;
+    background: #bcd6fb;
+    border: 1px solid #0e5fc9;
+    transition: background-color 0.3s ease, transform 0.3s ease;
+}
+.wizard-dot--done {
+    background: #8dbaf7;
+}
+.wizard-dot--active {
+    background: #0e5fc9;
+    transform: scale(1.3);
+}
+.wizard-btn {
+    min-width: 7rem;
+    padding: 0.7rem 1.6rem;
+    border-radius: 9999px;
+    border: 2px solid #0e5fc9;
+    background: #0e5fc9;
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(14, 95, 201, 0.4);
+    transition: background-color 0.2s ease, color 0.2s ease, opacity 0.2s ease;
+}
+.wizard-btn:hover:not(:disabled) {
+    background: #ffffff;
+    color: #0e5fc9;
+}
+.wizard-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+.wizard-btn--ghost {
+    background: #ffffff;
+    color: #0e5fc9;
+    box-shadow: none;
+}
+.wizard-btn--ghost:hover:not(:disabled) {
+    background: #0e5fc9;
+    color: #ffffff;
+}
+
 /* Main app content wrapper - flex column to push status bar to bottom */
 .app-wrapper {
     display: flex;

@@ -22,6 +22,7 @@
 import type { Component } from "vue";
 import HelpTab from "../components/tabs/HelpTab.vue";
 import LandingTab from "../components/tabs/LandingTab.vue";
+import CompleteTab from "../components/tabs/CompleteTab.vue";
 import PortsTab from "../components/tabs/PortsTab.vue";
 import ServosTab from "../components/tabs/ServosTab.vue";
 import ConfigurationTab from "../components/tabs/ConfigurationTab.vue";
@@ -53,6 +54,7 @@ import BlackboxViewerTab from "../components/tabs/BlackboxViewerTab.vue";
 export const VueTabComponents = {
     help: HelpTab,
     landing: LandingTab,
+    complete: CompleteTab,
     ports: PortsTab,
     servos: ServosTab,
     configuration: ConfigurationTab,
