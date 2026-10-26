@@ -18,9 +18,9 @@ import ConnectButton from "../device-picker/ConnectButton.vue";
     display: flex;
     min-height: 100%;
     background:
-        radial-gradient(60rem 40rem at 18% 8%, rgba(14, 95, 201, 0.7), transparent 60%),
-        radial-gradient(50rem 40rem at 92% 92%, rgba(79, 147, 238, 0.25), transparent 60%),
-        linear-gradient(160deg, #0e5fc9 0%, #073a7e 35%, #020b1c 70%, #000000 100%) !important;
+        radial-gradient(60rem 40rem at 18% 8%, rgba(79, 147, 238, 0.55), transparent 60%),
+        radial-gradient(50rem 40rem at 92% 92%, rgba(14, 95, 201, 0.35), transparent 60%),
+        linear-gradient(160deg, #0e5fc9 0%, #0a458f 40%, #062a5e 75%, #041d45 100%) !important;
     background-size: 140% 140%, 140% 140%, 100% 100%;
     animation: landing-drift 16s ease-in-out infinite alternate;
 }
@@ -48,7 +48,7 @@ import ConnectButton from "../device-picker/ConnectButton.vue";
 .tab-landing .landing-sub {
     margin: 0 0 1rem;
     font-size: 1.1rem;
-    color: #bcd6fb;
+    color: #cfe1fb;
 }
 .tab-landing .wizard-connect {
     width: min(340px, 80vw);

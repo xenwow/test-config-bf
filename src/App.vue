@@ -51,44 +51,18 @@
             <div
                 v-if="isSetupTab"
                 class="rotate-controls"
-                :class="{ 'rotate-controls--muted': !introDone || introStep === 1, 'rotate-controls--spot': spotlightVisible }"
+                :class="{ 'rotate-controls--muted': !introDone && introStep !== 2, 'rotate-controls--spot': spotlightVisible }"
             >
                 <button type="button" class="rotate-btn" @click="gyroOffset += 90">&#8634; Rotate 90&deg; left</button>
                 <button type="button" class="rotate-btn" @click="gyroOffset -= 90">Rotate 90&deg; right &#8635;</button>
             </div>
 
-            <Transition name="info-fade">
-                <div v-if="infoVisible || spotlightVisible" class="info-backdrop"></div>
-            </Transition>
-
-            <Transition name="info-pop">
-                <aside v-if="infoVisible" class="info-popup">
-                    <div class="info-popup__eyebrow">Step 1 &middot; Read first</div>
-                    <h2>How your drone knows which way is up</h2>
-                    <p>
-                        The gyro is a tiny sensor on the flight controller that measures how fast the drone rotates
-                        around its roll, pitch and yaw axes. Together with the accelerometer, which feels gravity, the
-                        flight controller turns those readings into the tilt you see on screen.
-                    </p>
-                    <p>
-                        We read it now to confirm the sensor answers correctly and that the board is mounted the way
-                        the firmware expects. If it is turned, a forward tilt shows up as a sideways tilt, and the
-                        drone would fly against its own corrections.
-                    </p>
-                    <p class="info-popup__note">You need to read this before you can continue.</p>
-                    <button type="button" class="info-popup__ok" @click="introStep = 2">Next</button>
-                </aside>
-            </Transition>
-
-            <Transition name="info-pop">
-                <div v-if="spotlightVisible" class="spot-callout">
-                    <div class="spot-callout__arrow"></div>
-                    <h3>Match the model to your drone</h3>
-                    <p>
-                        Tilt your real drone forward. If the model tilts sideways instead, press these buttons until
-                        it tilts forward too. They turn how the gyro reading is mapped on screen, not the model itself.
-                    </p>
-                    <button type="button" class="info-popup__ok" @click="finishIntro">Got it</button>
+            <Transition name="dlg" mode="out-in">
+                <div v-if="infoVisible" :key="introStep" class="dialogue">
+                    <div class="dialogue__eyebrow">{{ dialogue.eyebrow }}</div>
+                    <h2>{{ dialogue.title }}</h2>
+                    <p>{{ dialogue.text }}</p>
+                    <button type="button" class="dialogue__btn" @click="dialogue.action">{{ dialogue.button }}</button>
                 </div>
             </Transition>
 
@@ -152,6 +126,7 @@ import DroneStage from "./components/wizard/DroneStage.vue";
 import PortUsageModule from "./js/port_usage";
 import { i18n } from "./js/localization";
 import { setDarkTheme } from "./js/DarkTheme";
+import { mspHelper } from "./js/msp/MSPHelper";
 import { useUiLocale } from "./composables/useUiLocale";
 import { useFlightControllerStore } from "./stores/fc";
 import { useConnectionStore } from "./stores/connection";
@@ -314,8 +289,9 @@ const activeTabKey = computed(() =>
     vueTabState.activeTabName === "blackbox_viewer" ? "blackbox_viewer" : vueTabState.activeTabKey,
 );
 
-// Theme: dark (blue to black gradient) by default, with a light alternative.
+// Theme: the guided screens are dark blue in both modes; the toggle changes the stock panels.
 const THEME_KEY = "bfTestEditTheme";
+const GYRO_KEY = "bfTestEditGyroOffset";
 const isDark = ref(true);
 
 function applyTheme() {
@@ -329,10 +305,14 @@ function toggleTheme() {
     applyTheme();
 }
 
+// Gyro mapping offset in degrees: rotates what the gyro reads, not the model. Saved on Next.
+const gyroOffset = ref(0);
+
 onMounted(() => {
     isDark.value = localStorage.getItem(THEME_KEY) !== "light";
     applyTheme();
     setTimeout(applyTheme, 800);
+    gyroOffset.value = Number(localStorage.getItem(GYRO_KEY)) || 0;
 });
 
 // Guided flow: connect -> calibrate -> gyro (setup) -> motors -> complete.
@@ -364,13 +344,10 @@ const stageMode = computed<"calibrate" | "gyro" | "hidden">(() => {
     return "hidden";
 });
 
-// Gyro mapping offset in degrees: rotates what the gyro reads, not the model.
-const gyroOffset = ref(0);
-
-// Gyro screen intro: step 1 popup (mandatory), then a spotlight on the rotate buttons.
+// Gyro screen intro: two short on-screen lines beside the drone (mandatory the first time).
 const introStep = ref<0 | 1 | 2>(0);
 const introDone = ref(false);
-const infoVisible = computed(() => isSetupTab.value && introStep.value === 1);
+const infoVisible = computed(() => isSetupTab.value && introStep.value > 0);
 const spotlightVisible = computed(() => isSetupTab.value && introStep.value === 2);
 const nextBlocked = computed(() => isSetupTab.value && (!introDone.value || introStep.value !== 0));
 
@@ -379,13 +356,32 @@ function finishIntro() {
     introDone.value = true;
 }
 
+const dialogue = computed(() =>
+    introStep.value === 2
+        ? {
+              eyebrow: "Step 1 \u00b7 Match it",
+              title: "Tilt it forward",
+              text: "Tilt your drone forward. If the model tilts sideways, use the buttons above until it matches.",
+              button: "Got it",
+              action: finishIntro,
+          }
+        : {
+              eyebrow: "Step 1 \u00b7 Read first",
+              title: "Meet your gyro",
+              text: "The gyro senses how your drone rotates. With the accelerometer, it tells the flight controller which way is up. We check it so tilts on screen match tilts in your hands.",
+              button: "Next",
+              action: () => {
+                  introStep.value = 2;
+              },
+          },
+);
+
 watch(
     () => connectionStore.connectionValid,
     (valid) => {
         if (!valid) {
             introDone.value = false;
             introStep.value = 0;
-            gyroOffset.value = 0;
         }
     },
 );
@@ -394,12 +390,31 @@ function sleep(ms: number) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
+// Save to the flight controller's flash, and keep the gyro offset for next time.
+function saveChanges(): Promise<void> {
+    localStorage.setItem(GYRO_KEY, String(gyroOffset.value));
+    return new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 2500);
+        try {
+            mspHelper.writeConfiguration(false, () => {
+                clearTimeout(timeout);
+                resolve();
+            });
+        } catch (e) {
+            console.warn("Save on Next failed", e);
+            clearTimeout(timeout);
+            resolve();
+        }
+    });
+}
+
 async function goNext() {
     if (wizardBusy.value || !hasNext.value || nextBlocked.value) {
         return;
     }
     const next = WIZARD_STEPS[wizardIndex.value + 1];
     wizardBusy.value = true;
+    await saveChanges();
     stageTarget.value = next;
     contentFading.value = true;
     await sleep(550);
@@ -502,29 +517,24 @@ html.dark:root {
 
     --ui-primary: #0e5fc9;
     --ui-text-inverted: #ffffff;
-}
 
-/* Foreground colours for the guided-flow screens, per theme. */
-html:root {
-    --wz-fg: #0b3366;
-    --wz-muted: #3d5f8f;
-}
-html.dark:root {
+    /* Guided-flow screens are dark blue in both modes, so their text is always light. */
     --wz-fg: #ffffff;
-    --wz-muted: #bcd6fb;
+    --wz-muted: #cfe1fb;
 }
 
-/* Dark mode: the status bar is dark blue. */
-html.dark .app-status-bar#status-bar {
-    background: linear-gradient(90deg, #031a3d 0%, #06306b 100%) !important;
+/* Status bar: dark blue in both modes. */
+.app-status-bar#status-bar {
+    background: linear-gradient(90deg, #052a5e 0%, #0a3f8a 100%) !important;
     border-top: 1px solid rgba(79, 147, 238, 0.35);
     color: #ffffff;
 }
-html.dark .app-status-bar#status-bar .text-muted {
-    color: #bcd6fb !important;
+.app-status-bar#status-bar .text-muted,
+.app-status-bar#status-bar .stat-icon {
+    color: #cfe1fb !important;
 }
 
-/* ---- Test edit v4: layout, texture removal, gradients ---- */
+/* ---- Test edit v5: layout, texture removal, gradients ---- */
 .app-wrapper .tab_container {
     display: none !important;
 }
@@ -550,23 +560,18 @@ body,
     background-image: none !important;
 }
 
-/* Light: white to blue. Dark: blue to black. */
+/* Dark blue to a darker blue, no black, in both modes. */
 .app-wrapper #content {
     margin-inline-start: 0 !important;
     inset-inline-start: 0 !important;
     width: 100% !important;
     background:
-        radial-gradient(60rem 34rem at 88% -8%, rgba(14, 95, 201, 0.25), transparent 62%),
-        linear-gradient(180deg, #ffffff 0%, #dbe9fd 55%, #8dbaf7 100%) !important;
+        radial-gradient(70rem 40rem at 85% -10%, rgba(79, 147, 238, 0.45), transparent 60%),
+        linear-gradient(180deg, #0e5fc9 0%, #0a458f 35%, #062a5e 70%, #041d45 100%) !important;
     transition:
         opacity 0.5s ease,
         transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
         filter 0.5s ease;
-}
-html.dark .app-wrapper #content {
-    background:
-        radial-gradient(70rem 40rem at 85% -10%, rgba(14, 95, 201, 0.7), transparent 60%),
-        linear-gradient(180deg, #0e5fc9 0%, #073a7e 30%, #020b1c 70%, #000000 100%) !important;
 }
 .app-wrapper.wizard-bar-visible #content {
     padding-bottom: 7rem;
@@ -625,7 +630,7 @@ html.dark .app-wrapper #content {
 }
 .step-label__num {
     font-weight: 700;
-    color: #4f93ee;
+    color: #8dbaf7;
 }
 .step-label__rule {
     width: 3rem;
@@ -633,16 +638,12 @@ html.dark .app-wrapper #content {
     background: currentColor;
     opacity: 0.5;
 }
-.step-label--light,
-.step-label--light .step-label__num {
-    color: #ffffff;
-}
 
 /* Theme toggle and gyro controls. */
 .theme-toggle,
 .rotate-btn,
 .info-fab {
-    border: 2px solid #0e5fc9;
+    border: 2px solid #ffffff;
     background: rgba(255, 255, 255, 0.92);
     color: #0e5fc9;
     font-weight: 600;
@@ -692,15 +693,14 @@ html.dark .app-wrapper #content {
 .rotate-controls--spot .rotate-btn {
     animation: rotate-pulse 1.4s ease-in-out infinite;
     background: #ffffff;
-    box-shadow: 0 0 0 4px rgba(79, 147, 238, 0.55);
 }
 @keyframes rotate-pulse {
     0%,
     100% {
-        box-shadow: 0 0 0 3px rgba(79, 147, 238, 0.55);
+        box-shadow: 0 0 0 3px rgba(141, 186, 247, 0.8);
     }
     50% {
-        box-shadow: 0 0 0 11px rgba(79, 147, 238, 0);
+        box-shadow: 0 0 0 12px rgba(141, 186, 247, 0);
     }
 }
 .rotate-btn {
@@ -709,135 +709,70 @@ html.dark .app-wrapper #content {
     font-size: 0.85rem;
 }
 
-/* Centred mandatory popup, and the spotlight callout under the rotate buttons. */
-.info-backdrop {
+/* On-screen dialogue: plain text beside the drone, at the same vertical level, no box. */
+.dialogue {
     position: fixed;
-    inset: 0;
-    z-index: 1400;
-    background: rgba(0, 8, 24, 0.55);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-}
-.info-popup,
-.spot-callout {
+    left: 7vw;
+    top: 50%;
+    transform: translateY(-50%);
+    width: min(26rem, 36vw);
     z-index: 1500;
-    border: 1px solid rgba(14, 95, 201, 0.35);
-    background:
-        radial-gradient(22rem 16rem at 100% 0%, rgba(14, 95, 201, 0.18), transparent 70%),
-        linear-gradient(160deg, #ffffff, #e2eefd);
-    box-shadow: 0 30px 80px rgba(0, 8, 24, 0.5);
-    color: #0b3366;
-}
-html.dark .info-popup,
-html.dark .spot-callout {
-    background:
-        radial-gradient(22rem 16rem at 100% 0%, rgba(79, 147, 238, 0.35), transparent 70%),
-        linear-gradient(160deg, #0e5fc9 0%, #04204a 60%, #000000 130%);
-    border-color: rgba(255, 255, 255, 0.25);
     color: #ffffff;
 }
-.info-popup {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: min(34rem, 86vw);
-    padding: 2.25rem;
-    border-radius: 1.5rem;
-}
-.info-popup__eyebrow {
+.dialogue__eyebrow {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 0.75rem;
     letter-spacing: 0.18em;
     text-transform: uppercase;
-    color: #0e5fc9;
-    margin-bottom: 0.5rem;
+    color: #8dbaf7;
+    margin-bottom: 0.6rem;
 }
-html.dark .info-popup__eyebrow {
-    color: #bcd6fb;
-}
-.info-popup h2 {
-    margin: 0 0 1rem;
-    font-size: 1.8rem;
+.dialogue h2 {
+    margin: 0 0 0.8rem;
+    font-size: 2.6rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    line-height: 1.15;
+    line-height: 1.08;
 }
-.info-popup p {
-    margin: 0 0 0.9rem;
-    font-size: 0.98rem;
-    line-height: 1.6;
+.dialogue p {
+    margin: 0 0 1.4rem;
+    font-size: 1.05rem;
+    line-height: 1.55;
+    color: #cfe1fb;
 }
-.info-popup__note {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.75rem !important;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    opacity: 0.8;
-}
-.info-popup__ok {
-    margin-top: 0.5rem;
-    padding: 0.65rem 1.8rem;
+.dialogue__btn {
+    padding: 0.7rem 2rem;
     border-radius: 9999px;
     border: 2px solid #ffffff;
     background: linear-gradient(135deg, #1478f0 0%, #0e5fc9 55%, #0a3f8a 100%);
     color: #ffffff;
+    font-size: 1rem;
     font-weight: 600;
     cursor: pointer;
-}
-.spot-callout {
-    position: fixed;
-    top: 4.6rem;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(26rem, 86vw);
-    padding: 1.4rem 1.6rem;
-    border-radius: 1.2rem;
-}
-.spot-callout__arrow {
-    position: absolute;
-    top: -0.55rem;
-    left: 50%;
-    width: 1.1rem;
-    height: 1.1rem;
-    transform: translateX(-50%) rotate(45deg);
-    background: inherit;
-    border-left: 1px solid rgba(255, 255, 255, 0.25);
-    border-top: 1px solid rgba(255, 255, 255, 0.25);
-}
-.spot-callout h3 {
-    margin: 0 0 0.5rem;
-    font-size: 1.15rem;
-    font-weight: 700;
-}
-.spot-callout p {
-    margin: 0 0 0.8rem;
-    font-size: 0.92rem;
-    line-height: 1.55;
-}
-.info-fade-enter-active,
-.info-fade-leave-active {
-    transition: opacity 0.6s ease;
-}
-.info-fade-enter-from,
-.info-fade-leave-to {
-    opacity: 0;
-}
-.info-pop-enter-active,
-.info-pop-leave-active {
+    box-shadow: 0 8px 24px rgba(14, 95, 201, 0.45);
     transition:
-        opacity 0.6s ease,
-        transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+        background 0.25s ease,
+        color 0.25s ease,
+        transform 0.25s ease;
 }
-.info-popup.info-pop-enter-from,
-.info-popup.info-pop-leave-to {
-    opacity: 0;
-    transform: translate(-50%, -46%) scale(0.95);
+.dialogue__btn:hover {
+    background: #ffffff;
+    color: #0e5fc9;
+    transform: translateY(-1px);
 }
-.spot-callout.info-pop-enter-from,
-.spot-callout.info-pop-leave-to {
+.dlg-enter-active,
+.dlg-leave-active {
+    transition:
+        opacity 0.5s ease,
+        transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.dlg-enter-from {
     opacity: 0;
-    transform: translateX(-50%) translateY(-0.8rem);
+    transform: translateY(-50%) translateX(-1.5rem);
+}
+.dlg-leave-to {
+    opacity: 0;
+    transform: translateY(-50%) translateX(1rem);
 }
 
 /* Floating Next / Disconnect pills above the status bar. */
@@ -866,8 +801,8 @@ html.dark .info-popup__eyebrow {
     width: 0.75rem;
     height: 0.75rem;
     border-radius: 9999px;
-    background: #bcd6fb;
-    border: 1px solid #0e5fc9;
+    background: rgba(255, 255, 255, 0.25);
+    border: 1px solid #ffffff;
     transition:
         background 0.3s ease,
         transform 0.3s ease;
@@ -876,14 +811,14 @@ html.dark .info-popup__eyebrow {
     background: #8dbaf7;
 }
 .wizard-dot--active {
-    background: #0e5fc9;
+    background: #ffffff;
     transform: scale(1.3);
 }
 .wizard-btn {
     min-width: 7rem;
     padding: 0.7rem 1.6rem;
     border-radius: 9999px;
-    border: 2px solid #0e5fc9;
+    border: 2px solid #ffffff;
     background: linear-gradient(135deg, #1478f0 0%, #0e5fc9 55%, #0a3f8a 100%);
     color: #ffffff;
     font-size: 1rem;
