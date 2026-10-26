@@ -29,8 +29,6 @@ const { requestAttitude } = useSetupData();
 
 const RAD = Math.PI / 180;
 const REST_Y = -6;
-const DROP_FROM = 70;
-const DROP_MS = 1700;
 
 let model: InstanceType<typeof Model> | null = null;
 let disposed = false;
@@ -38,29 +36,9 @@ let rafId = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let busy = false;
 let busySince = 0;
-let dropStart: number | null = null;
 
 const attitude = { x: 0, y: 0, z: 0 };
 const cur = { x: 0, y: 0, z: 0, offset: 0, rest: REST_Y };
-
-function bounce(input: number): number {
-    const n1 = 7.5625;
-    const d1 = 2.75;
-    let t = input;
-    if (t < 1 / d1) {
-        return n1 * t * t;
-    }
-    if (t < 2 / d1) {
-        t -= 1.5 / d1;
-        return n1 * t * t + 0.75;
-    }
-    if (t < 2.5 / d1) {
-        t -= 2.25 / d1;
-        return n1 * t * t + 0.9375;
-    }
-    t -= 2.625 / d1;
-    return n1 * t * t + 0.984375;
-}
 
 function angleDiff(target: number, current: number): number {
     let d = (target - current) % (Math.PI * 2);
@@ -88,7 +66,7 @@ function poll() {
     });
 }
 
-function frame(now: number) {
+function frame() {
     rafId = requestAnimationFrame(frame);
     if (!model || !model.model || props.mode === "hidden") {
         return;
@@ -109,18 +87,8 @@ function frame(now: number) {
     const rx = cur.x * c - cur.z * s;
     const rz = cur.x * s + cur.z * c;
 
-    let y = REST_Y;
-    let tilt = 0;
-    if (props.mode === "calibrate" && dropStart === null) {
-        dropStart = now;
-    }
-    if (dropStart !== null) {
-        const t = Math.min(1, (now - dropStart) / DROP_MS);
-        y = DROP_FROM + (REST_Y - DROP_FROM) * bounce(t);
-        tilt = (1 - t) * 0.35;
-    }
-    model.modelWrapper.position.y = y + (cur.rest - REST_Y);
-    model.rotateTo(rx + tilt, cur.y, rz + tilt * 0.5);
+    model.modelWrapper.position.y = cur.rest;
+    model.rotateTo(rx, cur.y, rz);
 }
 
 function onResize() {
@@ -221,19 +189,6 @@ onBeforeUnmount(() => {
     transition: opacity 0.9s ease;
 }
 .drone-stage--calibrate .drone-stage__shadow {
-    animation: drone-shadow-land 1.7s ease-out both;
-}
-.drone-stage--gyro .drone-stage__shadow {
-    opacity: 0;
-}
-@keyframes drone-shadow-land {
-    from {
-        opacity: 0.05;
-        transform: translateX(-50%) scale(0.4);
-    }
-    to {
-        opacity: 0.8;
-        transform: translateX(-50%) scale(1);
-    }
+    opacity: 0.7;
 }
 </style>

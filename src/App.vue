@@ -105,6 +105,9 @@
                 :firmware-version="fcStore.config.flightControllerVersion"
                 :firmware-target="fcStore.config.hardwareName"
             ></status-bar>
+            <div class="demo-watermark" aria-hidden="true">
+                This is trash visuals.<br />No art direction has been put in. It is a technical demo.
+            </div>
             <div id="cache">
                 <div class="data-loading">
                     <p i18n="dataWaitingForData">Waiting for data ...</p>
@@ -117,7 +120,7 @@
 
 <script setup lang="ts">
 import { isAndroid } from "@/js/utils/checkCompatibility";
-import { computed, nextTick, onMounted, provide, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, reactive, ref, shallowRef, watch } from "vue";
 import { onKeyStroke, useMediaQuery } from "@vueuse/core";
 import ConnectButton from "./components/device-picker/ConnectButton.vue";
 import GlobalDialogs from "./components/dialogs/GlobalDialogs.vue";
@@ -207,6 +210,7 @@ watch(isCompactBreakpoint, (compact) => {
 // The branded top bar is a landing-page affordance.
 const isLandingTab = computed(() => vueTabState.activeTabName === "landing");
 const isSetupTab = computed(() => vueTabState.activeTabName === "setup");
+const isCalibrateTab = computed(() => vueTabState.activeTabName === "calibrate");
 
 // Connecting is the app's primary action and it lives in the drawer, which the phone shell no
 // longer opens. Teleport it into the floating chrome there, and leave it in place everywhere else.
@@ -308,11 +312,28 @@ function toggleTheme() {
 // Gyro mapping offset in degrees: rotates what the gyro reads, not the model. Saved on Next.
 const gyroOffset = ref(0);
 
+// The calibrate step must finish before the flow can continue; it then advances by itself.
+const calibrated = ref(false);
+
+function onCalibrated() {
+    calibrated.value = true;
+    setTimeout(() => {
+        if (isCalibrateTab.value) {
+            void goNext();
+        }
+    }, 1400);
+}
+
 onMounted(() => {
     isDark.value = localStorage.getItem(THEME_KEY) !== "light";
     applyTheme();
     setTimeout(applyTheme, 800);
     gyroOffset.value = Number(localStorage.getItem(GYRO_KEY)) || 0;
+    window.addEventListener("wizard-calibrated", onCalibrated);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener("wizard-calibrated", onCalibrated);
 });
 
 // Guided flow: connect -> calibrate -> gyro (setup) -> motors -> complete.
@@ -349,7 +370,10 @@ const introStep = ref<0 | 1 | 2>(0);
 const introDone = ref(false);
 const infoVisible = computed(() => isSetupTab.value && introStep.value > 0);
 const spotlightVisible = computed(() => isSetupTab.value && introStep.value === 2);
-const nextBlocked = computed(() => isSetupTab.value && (!introDone.value || introStep.value !== 0));
+const nextBlocked = computed(
+    () =>
+        (isSetupTab.value && (!introDone.value || introStep.value !== 0)) || (isCalibrateTab.value && !calibrated.value),
+);
 
 function finishIntro() {
     introStep.value = 0;
@@ -382,6 +406,7 @@ watch(
         if (!valid) {
             introDone.value = false;
             introStep.value = 0;
+            calibrated.value = false;
         }
     },
 );
@@ -534,7 +559,27 @@ html.dark:root {
     color: #cfe1fb !important;
 }
 
-/* ---- Test edit v5: layout, texture removal, gradients ---- */
+/* Always-on technical-demo watermark: huge, centred, 30% opacity, never blocks clicks. */
+.demo-watermark {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 92vw;
+    z-index: 9000;
+    text-align: center;
+    font-size: clamp(2.2rem, 7.5vw, 8rem);
+    font-weight: 900;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    text-transform: uppercase;
+    color: #ffffff;
+    opacity: 0.3;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ---- Test edit v6: layout, texture removal, gradients ---- */
 .app-wrapper .tab_container {
     display: none !important;
 }
