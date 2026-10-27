@@ -24,6 +24,7 @@ import HelpTab from "../components/tabs/HelpTab.vue";
 import LandingTab from "../components/tabs/LandingTab.vue";
 import CompleteTab from "../components/tabs/CompleteTab.vue";
 import CalibrateTab from "../components/tabs/CalibrateTab.vue";
+import MotorIntroTab from "../components/tabs/MotorIntroTab.vue";
 import PortsTab from "../components/tabs/PortsTab.vue";
 import ServosTab from "../components/tabs/ServosTab.vue";
 import ConfigurationTab from "../components/tabs/ConfigurationTab.vue";
@@ -56,6 +57,7 @@ export const VueTabComponents = {
     help: HelpTab,
     landing: LandingTab,
     calibrate: CalibrateTab,
+    motorintro: MotorIntroTab,
     complete: CompleteTab,
     ports: PortsTab,
     servos: ServosTab,
