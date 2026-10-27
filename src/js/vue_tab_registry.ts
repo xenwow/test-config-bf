@@ -1,24 +1,3 @@
-/*
- * This file is part of Betaflight.
- *
- * Betaflight is free software. You can redistribute this software
- * and/or modify this software under the terms of the GNU General
- * Public License as published by the Free Software Foundation,
- * either version 3 of the License, or (at your option) any later
- * version.
- *
- * Betaflight is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- *
- * See the GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public
- * License along with this software.
- *
- * If not, see <http://www.gnu.org/licenses/>.
- */
-
 import type { Component } from "vue";
 import HelpTab from "../components/tabs/HelpTab.vue";
 import LandingTab from "../components/tabs/LandingTab.vue";
@@ -45,7 +24,7 @@ import FailsafeTab from "../components/tabs/FailsafeTab.vue";
 import MotorsTab from "../components/tabs/MotorsTab.vue";
 import ReceiverTab from "../components/tabs/ReceiverTab.vue";
 import OsdTab from "../components/tabs/OsdTab.vue";
-import SetupTab from "../components/tabs/SetupTab.vue";
+import SetupTab from "../components/tabs/GuidedSetupTab.vue";
 import PidTuningTab from "../components/tabs/PidTuningTab.vue";
 import PreflightTab from "../components/tabs/PreflightTab.vue";
 import VtxTab from "../components/tabs/VtxTab.vue";
